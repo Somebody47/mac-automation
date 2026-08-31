@@ -1,0 +1,12 @@
+{
+  "comment": "Berlin floor-88 rooms, in the order they should be tried.",
+  "focus_rooms": [
+    { "name": "Berlin-88-18.3 - Focus Room (1)", "id": "xxx@resource.calendar.google.com" },
+    { "name": "Berlin-88-18.5 - Focus room (1)", "id": "yyy@resource.calendar.google.com" }
+  ],
+  "meeting_rooms": [
+    { "name": "Berlin-88-18.14 - Meeting Room (4)", "id": "c_xxx@resource.calendar.google.com" },
+    { "name": "Berlin-88-18.16 - Meeting room (4)", "id": "c_xxx@resource.calendar.google.com" },
+    { "name": "Berlin-88-18.18 - Meeting Room (4)", "id": "c_xxx@resource.calendar.google.com" }
+  ]
+}
