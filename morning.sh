@@ -1,5 +1,5 @@
 #!/bin/zsh
-# Morning setup: VS Code + Slack + Tunnelblick + MCP auth, then book Berlin rooms if in office.
+# Morning setup: VS Code + Slack + NetBird + MCP auth, then book Berlin rooms if in office.
 # Runs at login via ~/Library/LaunchAgents/eu.bolt.morning.plist.
 #
 # Every laptop start runs the whole thing. Re-running is safe: `open -a` on an
@@ -118,27 +118,20 @@ if (( ! ROOMS_ONLY )); then
 
   open -a Slack && log "Slack launched" || fail "could not launch Slack"
 
-  open -a Tunnelblick && log "Tunnelblick launched" || fail "could not launch Tunnelblick"
-  for i in {1..15}; do pgrep -qx Tunnelblick && break; sleep 1; done
+  open -a NetBird && log "NetBird launched" || fail "could not launch NetBird"
 
-  if pgrep -qx Tunnelblick; then
-    osascript -e 'tell application "Tunnelblick" to connect all' >/dev/null 2>&1 \
-      && log "Tunnelblick: connect all sent" || fail "Tunnelblick connect failed"
-    # Tunnelblick may put up an admin or credentials prompt; give it time,
-    # then report whatever state it settled in.
-    state=""
-    for i in {1..30}; do
-      state=$(osascript -e 'tell application "Tunnelblick" to get state of configuration 1' 2>/dev/null)
-      [[ $state == CONNECTED ]] && break
-      sleep 2
-    done
-    if [[ $state == CONNECTED ]]; then
-      log "VPN connected"
-    else
-      fail "VPN not connected (state: ${state:-unknown}) — it may be waiting for your password"
-    fi
+  # The daemon usually reconnects on its own; nudge it if it has not.
+  NETBIRD=/usr/local/bin/netbird
+  connected=0
+  for i in {1..15}; do
+    $NETBIRD status 2>/dev/null | grep -q "^Management: Connected" && { connected=1; break; }
+    (( i == 5 )) && $NETBIRD up >/dev/null 2>&1
+    sleep 2
+  done
+  if (( connected )); then
+    log "VPN connected"
   else
-    fail "Tunnelblick did not start"
+    fail "NetBird not connected — it may be waiting for you to log in"
   fi
 fi
 
@@ -162,6 +155,12 @@ log "online"
 # ---------------------------------------------------------------- MCP auth
 # The HTTP MCP servers use OAuth, so a stale token needs a browser click. We can
 # detect staleness and open the login flow, but you have to approve it.
+#
+# The login runs from a `.command` file handed to `open`, not an AppleScript
+# `do script`. A process launchd starts at login is not authorised to send Apple
+# events to Terminal (-1743), so `do script` was denied and the login never ran —
+# Terminal opened on an empty prompt and the wait loop timed out every time.
+# `open` needs no such permission.
 
 cd "$HOME" || exit 1
 mcp_status=$(claude mcp list 2>&1)
@@ -173,13 +172,24 @@ for srv in $MCP_SERVERS; do
   fi
 
   fail "MCP $srv needs re-authentication — opening login in Terminal"
-  osascript >/dev/null 2>&1 <<OSA
-tell application "Terminal"
-  activate
-  do script "claude mcp login $srv"
-end tell
-OSA
-  for i in {1..30}; do
+
+  launcher="$HERE/mcp-login-$srv.command"
+  print -rl -- "#!/bin/zsh" "claude mcp login $srv" > "$launcher"
+  chmod +x "$launcher"
+
+  open_err=$(open "$launcher" 2>&1)
+  open_rc=$?
+  if (( open_rc )); then
+    fail "could not open the login window for $srv (exit $open_rc): ${open_err:-no output} — run 'claude mcp login $srv' by hand"
+    continue
+  fi
+  notify "Morning setup" "$srv needs re-authentication — approve it in the Terminal window."
+
+  # An OAuth round trip means finding the browser tab and clicking through, so
+  # allow 8 minutes. Two was never enough to finish it while the laptop was
+  # still waking up.
+  log "waiting for you to approve $srv (up to 8 min)"
+  for i in {1..120}; do
     sleep 4
     if claude mcp list 2>&1 | grep -E "^${srv}:" | grep -q "Connected"; then
       log "MCP $srv: re-authenticated"
