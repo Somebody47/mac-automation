@@ -199,6 +199,66 @@ for srv in $MCP_SERVERS; do
   done
 done
 
+# ---------------------------------------------------------------- dbt / Databricks
+# Same constraint as MCP: a stale OAuth login needs a browser click, so we open
+# `databricks auth login` in Terminal and wait. The env vars are unset because
+# an exported DATABRICKS_TOKEN/HOST overrides the profile and breaks the CLI.
+
+dbx() {
+  env -u DATABRICKS_TOKEN -u DATABRICKS_ACCESS_TOKEN -u DATABRICKS_HOST \
+    databricks "$@" --profile "$DBT_DATABRICKS_PROFILE"
+}
+
+if dbx auth token >/dev/null 2>&1; then
+  log "Databricks login ($DBT_DATABRICKS_PROFILE): valid"
+else
+  fail "Databricks login ($DBT_DATABRICKS_PROFILE) expired — opening login in Terminal"
+
+  launcher="$HERE/databricks-login.command"
+  print -rl -- "#!/bin/zsh" "databricks auth login --profile $DBT_DATABRICKS_PROFILE" > "$launcher"
+  chmod +x "$launcher"
+
+  if open "$launcher" >/dev/null 2>&1; then
+    notify "Morning setup" "Databricks login expired — approve it in the browser."
+    log "waiting for you to approve the Databricks login (up to 8 min)"
+    for i in {1..120}; do
+      sleep 4
+      if dbx auth token >/dev/null 2>&1; then
+        log "Databricks login ($DBT_DATABRICKS_PROFILE): re-authenticated"
+        PROBLEMS=(${PROBLEMS:#*Databricks login*})
+        break
+      fi
+    done
+  else
+    fail "could not open the Databricks login window — run 'databricks auth login --profile $DBT_DATABRICKS_PROFILE' by hand"
+  fi
+fi
+
+if dbx auth token >/dev/null 2>&1; then
+  cluster=$(dbx clusters get "$DBT_CLUSTER_ID" -o json 2>&1)
+  if [[ $(print -r -- "$cluster" | jq -r '.state // empty' 2>/dev/null) == "" ]]; then
+    fail "dbt cluster $DBT_CLUSTER_ID not found or not readable (it may have been deleted): ${cluster:0:200}"
+  else
+    state=$(print -r -- "$cluster" | jq -r '.state')
+    terminated_ms=$(print -r -- "$cluster" | jq -r '.terminated_time // 0')
+    log "dbt cluster $DBT_CLUSTER_ID: $state"
+
+    if [[ $state == TERMINATED ]] && (( terminated_ms > 0 )); then
+      days=$(( ( $(date +%s) - terminated_ms / 1000 ) / 86400 ))
+      if (( days >= DBT_CLUSTER_MAX_TERMINATED_DAYS )); then
+        log "dbt cluster terminated $days days ago — starting it so it is not deleted"
+        dbx clusters start "$DBT_CLUSTER_ID" --no-wait >/dev/null 2>&1 \
+          && log "dbt cluster start requested" \
+          || fail "could not start dbt cluster $DBT_CLUSTER_ID"
+      else
+        log "dbt cluster terminated $days days ago — no need to start it"
+      fi
+    elif [[ $state == ERROR ]]; then
+      fail "dbt cluster $DBT_CLUSTER_ID is in ERROR state: $(print -r -- "$cluster" | jq -r '.state_message')"
+    fi
+  fi
+fi
+
 # ---------------------------------------------------------------- office check
 
 ssid=$(current_ssid)
