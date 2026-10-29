@@ -22,6 +22,15 @@ OFFICE_GATEWAY_MACS=(
 # MCP servers to health-check (and re-authenticate) before touching the calendar.
 MCP_SERVERS=(bolt-pint atlassian)
 
+# Databricks CLI profile (in ~/.databrickscfg) and the all-purpose cluster dbt
+# runs on (the cluster id at the end of http_path in ~/.dbt/profiles.yml).
+DBT_DATABRICKS_PROFILE="YOUR_DATABRICKS_PROFILE"
+DBT_CLUSTER_ID="YOUR_CLUSTER_ID"
+
+# Databricks deletes an all-purpose cluster that has stayed terminated for 30
+# days. Start it once it has been terminated this many days, well before that.
+DBT_CLUSTER_MAX_TERMINATED_DAYS=15
+
 # Colleagues who sit in the Berlin office. If one of them is on a meeting,
 # the meeting gets a real meeting room; otherwise you are alone on the call
 # and get a focus room.
