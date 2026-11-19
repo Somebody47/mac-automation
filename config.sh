@@ -38,6 +38,24 @@ BERLIN_COLLEAGUES=(
   email_1
   email_2)
 
+# Daily AB scorecards digest (skill: ab-scorecards-overview): builds the HTML and
+# sends it to your own Slack DM. 1 = run it once per day, after room booking.
+# The Slack DM is not idempotent like room booking, so it is sent once per day only
+# (stamp file logs/ab-scorecards-<date>.done, written after the Slack link comes back).
+AB_SCORECARDS=1
+AB_MODEL="sonnet"
+AB_TIMEOUT=1200
+
+# Unattended run, so no questions. Headless Bash refuses any command that sets a
+# shell variable and then uses it ("can't be checked before it runs"), which is
+# what the skill's upload step does, hence the literal-URL instruction.
+AB_PROMPT='Run the ab-scorecards-overview skill (invoke it with the Skill tool) with its defaults, including step 6: send the HTML to my own Slack DM. This is an unattended run: never ask questions. If a connection (AB, Google Sheets, Slack) is unavailable, stop and say which one. Bash cannot run a command that sets a shell variable, so in step 6 do not use a URL variable: POST with curl and write the upload URL literally, in single quotes, inside the curl command itself. End your answer with the absolute HTML path and the Slack file link, each on its own line.'
+
+# Tools the digest may use. Writes are limited to the reports folder and the
+# skill's personal folder; if reports_dir in ~/.config/ab-scorecards-overview/settings.json
+# changes, change the first Edit path too.
+AB_ALLOWED_TOOLS="Skill,Read,Edit(~/Agentic_OS/reports/**),Edit(~/.config/ab-scorecards-overview/**),Bash(python3:*),Bash(curl:*),Bash(wc:*),Bash(date:*),Bash(mkdir:*),mcp__ab-mcp__ab_test_search,mcp__ab-mcp__ab_test_get,mcp__ab-mcp__ab_scorecard_dashboards,mcp__ab-mcp__ab_scorecard_get,mcp__bolt-pint__read_sheet_values,mcp__claude_ai_Slack__slack_get_file_upload_url,mcp__claude_ai_Slack__slack_complete_file_upload,mcp__claude_ai_Slack__slack_send_message"
+
 # Meetings after this local time are left alone.
 END_OF_DAY="19:00:00"
 

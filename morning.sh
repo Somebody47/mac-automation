@@ -1,5 +1,6 @@
 #!/bin/zsh
-# Morning setup: VS Code + Slack + NetBird + MCP auth, then book Berlin rooms if in office.
+# Morning setup: VS Code + Slack + NetBird + MCP auth, then book Berlin rooms if in office,
+# then send the daily AB scorecards overview to your Slack DM (once per day).
 # Runs at login via ~/Library/LaunchAgents/eu.bolt.morning.plist.
 #
 # Every laptop start runs the whole thing. Re-running is safe: `open -a` on an
@@ -319,6 +320,73 @@ if (( in_office )); then
       on && /^- / && !/^- none/ {print}')
     [[ -n $bad ]] && PROBLEMS+=("rooms not booked:"$'\n'"$bad")
     notify "Morning setup" "${summary:-Room booking finished}"
+  fi
+fi
+
+# ---------------------------------------------------------------- AB scorecards
+# Daily digest of the team's AB tests, sent to your own Slack DM by the
+# ab-scorecards-overview skill. Unlike the rest of this script it is NOT safe to
+# repeat (every run is another DM), so a stamp file limits it to once per day and
+# is only written once the Slack file link comes back. Skipped with --rooms-only.
+
+if (( AB_SCORECARDS && ! ROOMS_ONLY )); then
+  ab_stamp="$LOG_DIR/ab-scorecards-$(date +%Y-%m-%d).done"
+  if [[ -e $ab_stamp ]]; then
+    log "AB scorecards overview: already sent today"
+  else
+    log "running AB scorecards overview (up to ${AB_TIMEOUT}s)"
+    ab_report=$(perl -e 'alarm shift; exec @ARGV' "$AB_TIMEOUT" \
+      claude -p "$AB_PROMPT" \
+        --model "$AB_MODEL" \
+        --allowedTools "$AB_ALLOWED_TOOLS" \
+        --disallowedTools "WebFetch,WebSearch" \
+        --max-turns 200 2>&1)
+    ab_rc=$?
+
+    print -r -- "$ab_report" >> "$LOG"
+
+    ab_link=$(print -r -- "$ab_report" | grep -Eo 'https://[^ )>]*slack\.com/files/[^ )>]*' | tail -1)
+    if (( ab_rc != 0 )); then
+      fail "AB scorecards overview did not finish (exit $ab_rc, ${AB_TIMEOUT}s limit) — see today's log"
+    elif [[ -z $ab_link ]]; then
+      fail "AB scorecards overview finished but returned no Slack link, so it was probably not sent — see today's log"
+    else
+      touch "$ab_stamp"
+      log "AB scorecards overview sent: $ab_link"
+    fi
+  fi
+fi
+
+# ---------------------------------------------------------------- AWS SSO
+# Last step: the login needs a browser click and may wait up to 8 minutes, so it
+# must not hold up anything above. Skipped while the session is still valid.
+# Skipped with --rooms-only.
+
+AWS=/usr/local/bin/aws
+if (( ! ROOMS_ONLY )); then
+  if $AWS sts get-caller-identity --profile datascience >/dev/null 2>&1; then
+    log "AWS SSO (datascience): valid"
+  else
+    fail "AWS SSO (datascience) expired — opening login in Terminal"
+
+    launcher="$HERE/aws-sso-login.command"
+    print -rl -- "#!/bin/zsh" "$AWS sso login --profile datascience" > "$launcher"
+    chmod +x "$launcher"
+
+    if open "$launcher" >/dev/null 2>&1; then
+      notify "Morning setup" "AWS SSO login expired — approve it in the browser."
+      log "waiting for you to approve the AWS SSO login (up to 8 min)"
+      for i in {1..120}; do
+        sleep 4
+        if $AWS sts get-caller-identity --profile datascience >/dev/null 2>&1; then
+          log "AWS SSO (datascience): re-authenticated"
+          PROBLEMS=(${PROBLEMS:#*AWS SSO*})
+          break
+        fi
+      done
+    else
+      fail "could not open the AWS SSO login window — run '$AWS sso login --profile datascience' by hand"
+    fi
   fi
 fi
 
